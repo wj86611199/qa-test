@@ -1,0 +1,19 @@
+version: '3'
+services:
+  vnc-server:
+    build: .
+    platform: linux/amd64
+    ports:
+      - "5901:5901"  # VNC端口
+      - "6080:6080"  # NoVNC端口
+      - "3000:3000"  # Node.js服务端口
+    restart: unless-stopped
+    environment:
+      - DISPLAY=:1
+      - RESOLUTION=1280x800x24
+      - NO_VNC_PORT=6080
+      - VNC_PORT=5901
+    volumes:
+      - ./server:/server  # 挂载Node.js服务目录
+    cap_add:
+      - SYS_ADMIN  # 可能需要额外权限运行浏览器
