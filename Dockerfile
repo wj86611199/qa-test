@@ -1,70 +1,87 @@
-# 基础镜像和系统依赖
-FROM --platform=linux/amd64 ubuntu:20.04
+FROM ubuntu:20.04
+# 设置非交互式安装模式
 ENV DEBIAN_FRONTEND=noninteractive
-
 # 使用更可靠的镜像源
 RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+    sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
+    sed -i 's/ports.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 
-# 安装基础依赖
+# 安装基础工具
 RUN apt-get update && apt-get install -y \
-    wget \
     curl \
-    gnupg \
+    gnupg2 \
+    wget \
+    apt-transport-https \
     ca-certificates \
-    supervisor \
-    xvfb \
-    x11vnc \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 安装Web服务器
+RUN apt-get update && apt-get install -y \
+    nginx \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 安装Node.js 22.x (LTS版本)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x |  bash - && \
+    apt-get install -y nodejs && \
+    npm config set registry https://registry.npmmirror.com && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 安装全局工具
+RUN npm install -g nodemon pnpm
+
+# 安装VNC相关组件
+RUN apt-get update && apt-get install -y \
+    tigervnc-standalone-server \
     novnc \
     websockify \
-    openbox \
-    python3 \
-    python3-pip \
-    fonts-noto-cjk \
-    git \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 安装Node.js (使用单个RUN命令安装NVM和Node.js)
-ENV NVM_DIR=/root/.nvm
-RUN curl -o- https://gitee.com/mirrors/nvm/raw/v0.39.7/install.sh | bash && \
-    . "$NVM_DIR/nvm.sh" && \
-    nvm install 22 && \
-    nvm alias default 22 && \
-    nvm use default && \
-    echo 'export NVM_DIR="$HOME/.nvm"' >> /root/.bashrc && \
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> /root/.bashrc && \
-    echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"' >> /root/.bashrc
-
-# 创建全局Node.js命令链接
-RUN . "$NVM_DIR/nvm.sh" && \
-    ln -sf "$(which node)" /usr/local/bin/node && \
-    ln -sf "$(which npm)" /usr/local/bin/npm
-
-# 验证Node.js版本
-RUN node -v && npm -v
+RUN apt-get update && apt-get install -y \
+    net-tools \
+    lsof \
+    procps \
+    x11-utils \
+    dbus-x11 \
+    xvfb \
+    x11vnc\
+    x11-apps
 
 # 安装Playwright
-RUN . "$NVM_DIR/nvm.sh" && \
-    npm install -g playwright@1.40.0 && \
-    npx playwright install --with-deps chromium firefox webkit
+RUN  npx playwright install && \
+    npx playwright install-deps; 
 
-# 设置环境变量
-ENV DISPLAY=:1
-ENV RESOLUTION=1280x800x24
-ENV NO_VNC_PORT=6080
-ENV VNC_PORT=5901
+# 安装Supervisor
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 创建日志目录
 RUN mkdir -p /var/log/supervisor
 
-# 复制配置文件
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# 设置VNC
+RUN mkdir -p /root/.vnc && \
+    echo "password" | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 777 /root/.vnc/passwd
 
-# 暴露端口
-EXPOSE 5901 6080 3000
+# 创建启动脚本
+RUN mkdir -p /scripts
+COPY entrypoint.sh /scripts/
+RUN chmod +x /scripts/entrypoint.sh
 
-# 设置入口点
-ENTRYPOINT ["/entrypoint.sh"]
+# 创建supervisor配置文件
+COPY supervisord.conf /etc/supervisor/conf.d/
+
+# 复制服务器文件
+#COPY server  /server
+
+# 设置工作目录
+WORKDIR /server
+
+# 复制package.json并安装依赖
+COPY server/package.json /server/
+RUN npm install
+
+# 暴露VNC和NoVNC端口
+EXPOSE 5901
+EXPOSE 6080
+EXPOSE 3000
